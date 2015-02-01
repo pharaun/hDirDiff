@@ -1,3 +1,4 @@
+import Control.Concurrent.Async
 import Control.Applicative
 import Control.Monad.Trans.State.Strict
 import Data.Char
@@ -9,7 +10,7 @@ import qualified Data.Map as Map
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Char8 as C8
 
-import Pipes ((>->), Producer)
+import Pipes (Producer)
 import qualified Pipes as P
 import qualified Pipes.Prelude as P
 import qualified Pipes.Attoparsec as PA
@@ -25,18 +26,36 @@ main = do
     (src, dst) <- getArgs
 
     -- Handle source hash
-    srcMap <- withFile src ReadMode emitHashMap
-    dstMap <- withFile dst ReadMode emitHashMap
+    (srcMap, dstMap) <- concurrently (withFile src ReadMode emitHashMap) (withFile dst ReadMode emitHashMap)
+
+    -- Several steps to be done:
+    -- 1. Identify files that has been removed from the destination
+    --      (check hashes that are not present)
+    -- 2. Identify files that has been added to the destination
+    --      (check hashes that are new)
+    -- 3. Identify moved files
+    --      a. Compare file list, if same then move on
+    --      b. If src is not empty and dst is empty, we removed files copies
+    --      c. If dst is not empty and src is empty, we added file copies
+    --      d. If dst and source is not empty, we have some sort of moves
+    --          (Since all source and all dest is the same, can probably make
+    --              it simpler and just do multiple copies from one
+    --              source/dest to the rest)
+    -- 4. Emit changed list (added/removed/moved)
+
 
     -- Compare the two map and create a "final map"
     putStrLn "Hi"
 
 emitHashMap :: Handle -> IO (Map ByteString [ByteString])
-emitHashMap h = do
-    P.runEffect $ (pipeHashLine (PB.fromHandle h) >-> P.map (\(a, b) -> (BS.intercalate (C8.pack " : ") [a, b]) `BS.append` (C8.pack "\n")) >-> PB.stdout)
-    return Map.empty
+emitHashMap h = P.runEffect $ (P.fold updateMap Map.empty id (pipeHashLine (PB.fromHandle h)))
 
+-- updatemap
+-- TODO: probably want to make that [] list into a Set
+updateMap :: Map ByteString [ByteString] -> (ByteString, ByteString) -> Map ByteString [ByteString]
+updateMap m (h, f) = Map.insertWith' (++) h [f] m
 
+-- Hash line pipe
 pipeHashLine :: P.MonadIO m => Producer ByteString m () -> Producer (ByteString, ByteString) m ()
 pipeHashLine producer = do
     (result, rest) <- P.lift $ runStateT (PA.parse hashLine) producer
@@ -75,10 +94,6 @@ lf = skip ((==) wLF)
 hashLine :: Parser (ByteString, ByteString)
 hashLine = (,) <$> (takeWhile1 ((/=) wSpace) <* many spaces) <*> (takeWhile1 ((/=) wLF) <* lf)
 
-
-
-updateMap :: Map ByteString [ByteString] -> (ByteString, ByteString) -> Map ByteString [ByteString]
-updateMap m (h, f) = Map.insertWith' (++) h [f] m
 
 -- CLI options
 getArgs :: IO (FilePath, FilePath)
