@@ -2,7 +2,7 @@ import Control.Concurrent.Async
 import Control.Applicative
 import Control.Monad.Trans.State.Strict
 import Data.Char
-import System.IO (withFile, IOMode(ReadMode), Handle)
+import System.IO (withFile, IOMode(ReadMode), Handle, stdout)
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -11,6 +11,7 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as C8
 
 import Pipes (Producer)
 import qualified Pipes as P
@@ -21,8 +22,19 @@ import qualified Pipes.ByteString as PB
 
 import Data.Attoparsec.ByteString (Parser, skip, takeWhile1)
 
-import Options.Applicative hiding (Parser)
+import Options.Applicative hiding (Parser, str)
 
+-- TODO: output matches within of ~500 difference out of 55k action between
+-- dominikh and my implementation, this means there's either some minor
+-- variation in what we pick to delete/copy/up or one of our impl isn't
+-- quite doing something right. This needs to have lots of tests.
+--
+-- Tests:
+--  1. One upload
+--  2. One removal
+--  3. One move (A -> B)
+--  4. One to many Copy (A -> B, A -> C)
+--  5. Overlapping upload/removal/move
 
 main = do
     (src, dst) <- getArgs
@@ -80,7 +92,24 @@ main = do
     -- Compare the two map and create a "final map"
     --
     -- For comparing with test.awk emit the test.awk output format
+    let output = Map.foldl (\str v -> BS.concat [str, foldlMap v]) (C8.pack "") moved
+    C8.hPutStr stdout output
 
+foldlMap :: Action -> ByteString
+foldlMap (Removed x)    = Set.foldl (\str v -> BS.concat [str, C8.pack "rm r/", v, C8.pack "\n"]) (C8.pack "") x
+foldlMap (Added x)      = do
+    let up = Set.elemAt 0 x
+    let cp = Set.delete up x
+    BS.concat
+        [ C8.pack "up s/", up, C8.pack "\n"
+        , Set.foldl (\str v -> BS.concat [str, C8.pack "cp r/", up, C8.pack " r/", v, C8.pack "\n"]) (C8.pack "") cp
+        ]
+foldlMap (Moved s a r)  = BS.concat
+    [ Set.foldl (\str v -> BS.concat [str, C8.pack "cp r/", s, C8.pack " r/", v, C8.pack "\n"]) (C8.pack "") a
+    , Set.foldl (\str v -> BS.concat [str, C8.pack "rm r/", v, C8.pack "\n"]) (C8.pack "") r
+    ]
+
+-- | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
 
 --      a. Compare file list, if same then move on
 --      b. If src is not empty and dst is empty, we removed files copies
@@ -102,10 +131,10 @@ findMovedFiles src dst
     -- We can just grab the first file of the destination and use that
     -- as the source of the "copy-from" operation to fullfill the
     -- added files list then apply the removed list.
-    | otherwise                             = Just $ Moved (Set.elemAt 0 dst) (Set.difference dst src) (Set.difference src dst)
+    | otherwise                             = Just $ Moved (Set.elemAt 0 dst) (Set.difference src (Set.delete (Set.elemAt 0 dst) dst)) (Set.difference dst src)
 
 data Action = Removed (Set ByteString) -- Remove
-            | Added (Set ByteString) -- Upload
+            | Added (Set ByteString) -- Local file to Upload
             | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
             deriving Show
 
