@@ -62,6 +62,7 @@ pipeHashLineData =
 updateMapData =
     [ ("Empty Map",     updateMap Map.empty ("a", "b"),                                 Map.singleton "a" (Set.singleton "b"))
     , ("One Map",       updateMap (Map.singleton "a" (Set.singleton "a")) ("a", "b"),   Map.singleton "a" (Set.fromAscList ["a", "b"]))
+    , ("Two Map",       updateMap (Map.singleton "a" (Set.singleton "a")) ("b", "b"),   Map.fromList [("a", Set.singleton "a"), ("b", Set.singleton "b")])
     , ("Overwrite Map", updateMap (Map.singleton "a" (Set.singleton "a")) ("a", "a"),   Map.singleton "a" (Set.singleton "a"))
     ]
 
