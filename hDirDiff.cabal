@@ -64,3 +64,4 @@ Test-Suite test-hdirdiff
                      , test-framework
                      , test-framework-hunit
                      , hDirDiff
+                     , directory

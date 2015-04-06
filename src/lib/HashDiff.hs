@@ -60,7 +60,7 @@ findMovedFiles src dst
 data Action = Removed (Set ByteString) -- Remove
             | Added (Set ByteString) -- Local file to Upload
             | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
-            deriving Show
+            deriving (Show, Eq)
 
 
 -- | Extended version of 'intersectionWith' that enables dropping of
