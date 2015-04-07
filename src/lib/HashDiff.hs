@@ -16,7 +16,44 @@ import qualified Data.ByteString.Char8 as C8
 
 import Pipes.ByteString (ByteString)
 
+-- Actions to perform
+data Action = Removed (Set ByteString) -- Remove
+            | Added (Set ByteString) -- Local file to Upload
+            | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
+            deriving (Show, Eq)
 
+
+-- | Extended version of 'intersectionWith' that enables dropping of
+-- elements if the combining function returns a 'Nothing'
+--
+--optionalIntersectionWith :: Ord k => (a -> b -> Maybe c) -> Map k a -> Map k b -> Map k c
+optionalIntersectionWith :: Ord k => (Set ByteString -> Set ByteString -> Maybe Action) -> Map k (Set ByteString) -> Map k (Set ByteString) -> Map k Action
+optionalIntersectionWith func initial final = Map.mergeWithKey (\_ i f -> func i f) (Map.map Removed) (Map.map Added) initial final
+
+
+findMovedFiles :: Set ByteString -> Set ByteString -> Maybe Action
+findMovedFiles initial final
+    -- 1. Compare file list, if same then move on
+    | initial == final                              = Nothing
+
+    -- 2. If initial is empty and final is not, we've added files
+    | Set.null initial && (not $ Set.null final)    = Just $ Added final
+
+    -- 3. If initial is not empty and final is, we've removed files
+    | (not $ Set.null initial) && Set.null final    = Just $ Removed initial
+
+    -- 4. Both initial and final state are not empty or the same.
+    --  Check if there's anything to copy to, if not its a removal (excess files)
+    --  Else it is a move with possibly some extra new file and excess files
+    | otherwise =
+        let new = Set.difference final initial
+            removed = Set.difference initial final
+            copyFrom = Set.elemAt 0 initial
+            copyTo = Set.delete copyFrom new
+
+        in if Set.null copyTo
+           then Just $ Removed removed
+           else Just $ Moved copyFrom copyTo removed
 
 
 foldlMap :: Action -> ByteString
@@ -32,41 +69,3 @@ foldlMap (Moved s a r)  = BS.concat
     [ Set.foldl (\str v -> BS.concat [str, C8.pack "cp r/", s, C8.pack " r/", v, C8.pack "\n"]) (C8.pack "") a
     , Set.foldl (\str v -> BS.concat [str, C8.pack "rm r/", v, C8.pack "\n"]) (C8.pack "") r
     ]
-
--- | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
-
---      a. Compare file list, if same then move on
---      b. If src is not empty and dst is empty, we removed files copies
---      c. If dst is not empty and src is empty, we added file copies
---      d. If dst and source is not empty, we have some sort of moves
---          (Since all source and all dest is the same, can probably make
---              it simpler and just do multiple copies from one
---              source/dest to the rest)
-findMovedFiles :: Set ByteString -> Set ByteString -> Maybe Action
-findMovedFiles src dst
-    -- Exactly the same, no change
-    | src == dst                            = Nothing
-    -- Shouldn't happen?
-    | (not $ Set.null src) && Set.null dst  = Just $ Removed src
-    -- Shouldn't happen?
-    | Set.null src && (not $ Set.null dst)  = Just $ Added dst
-    -- Both src & dest is not empty let's figure out what kind of move it is
-    --
-    -- We can just grab the first file of the destination and use that
-    -- as the source of the "copy-from" operation to fullfill the
-    -- added files list then apply the removed list.
-    | otherwise                             = Just $ Moved (Set.elemAt 0 dst) (Set.difference src (Set.delete (Set.elemAt 0 dst) dst)) (Set.difference dst src)
-
-data Action = Removed (Set ByteString) -- Remove
-            | Added (Set ByteString) -- Local file to Upload
-            | Moved ByteString (Set ByteString) (Set ByteString) -- Src to copy from, added files (to copy to), removed files (to remove afterward)
-            deriving (Show, Eq)
-
-
---let changes = optionalIntersectionWith findMovedFiles initialMap finalMap
--- | Extended version of 'intersectionWith' that enables dropping of
--- elements if the combining function returns a 'Nothing'
--- TODO: find a way to make the types more generic
---optionalIntersectionWith :: Ord k => (a -> b -> Maybe c) -> Map k a -> Map k b -> Map k c
-optionalIntersectionWith :: (Set ByteString -> Set ByteString -> Maybe Action) -> Map ByteString (Set ByteString) -> Map ByteString (Set ByteString) -> Map ByteString Action
-optionalIntersectionWith f t1 t2 = Map.mergeWithKey (\_ x1 x2 -> f x1 x2) (Map.map Removed) (Map.map Added) t1 t2
