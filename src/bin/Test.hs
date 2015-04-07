@@ -99,6 +99,19 @@ withTempFile pattern func = do
            (do hClose temph
                removeFile tempfile)
 
+
+
+-- TODO: output matches within of ~500 difference out of 55k action between
+-- dominikh and my implementation, this means there's either some minor
+-- variation in what we pick to delete/copy/up or one of our impl isn't
+-- quite doing something right. This needs to have lots of tests.
+--
+-- Tests:
+--  1. One upload
+--  2. One removal
+--  3. One move (A -> B)
+--  4. One to many Copy (A -> B, A -> C)
+--  5. Overlapping upload/removal/move
 -- TODO: same issue as intersectionwith - should rename things from src dst
 -- to inital and final state to be clearer as of what is going on.
 findMovedFilesData =

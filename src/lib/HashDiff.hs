@@ -63,6 +63,7 @@ data Action = Removed (Set ByteString) -- Remove
             deriving (Show, Eq)
 
 
+--let changes = optionalIntersectionWith findMovedFiles initialMap finalMap
 -- | Extended version of 'intersectionWith' that enables dropping of
 -- elements if the combining function returns a 'Nothing'
 -- TODO: find a way to make the types more generic
